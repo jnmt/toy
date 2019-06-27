@@ -31,3 +31,5 @@
 *.out
 *.app
 bptree/bptree
+search/bs
+search/hash
