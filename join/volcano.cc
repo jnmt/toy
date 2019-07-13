@@ -109,10 +109,8 @@ public:
 
 public:
   RECORD* next() {
-    int cur = cursor;
-    if (cur < size) {
-      cursor++;
-      return table[cur];
+    if (cursor < size) {
+      return table[cursor++];
     } else
       return NULL;
   }
@@ -154,7 +152,7 @@ public:
       rightRec = right->next();
       while (rightRec) {
         if (leftRec->attr[leftAttr] == rightRec->attr[rightAttr])
-          return join_record(rightRec, leftRec);
+          return join_record(leftRec, rightRec);
         else
           rightRec = right->next();
       }
