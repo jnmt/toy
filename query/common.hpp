@@ -3,8 +3,7 @@
 #include <stdlib.h>
 #include <vector>
 
-#define DEFAULT_TABLE_SIZE 1000
-#define DEFAULT_NUM_SPACE 10000
+#define DEFAULT_DELIMITER '|'
 #define MAX_TABLE_NUM 16
 
 typedef struct _RECORD {

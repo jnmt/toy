@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <sys/time.h>
 #include <vector>
 
@@ -32,8 +34,6 @@ RECORD* alloc_record(int id) {
   RECORD *record;
   if (!(record = (RECORD *)calloc(1, sizeof(RECORD))))
     printf("Error (%s): calloc failed.\n", __func__);
-  record->attr.push_back(id); // key for join
-  record->attr.push_back(rand() % numSpace); // foreign key
   return record;
 }
 
@@ -52,11 +52,35 @@ void init_database(int n) {
   }
 }
 
+bool load_table(std::vector<RECORD*> *t, const char *filename) {
+  std::ifstream filestream(filename);
+  if (!filestream.is_open()) return false;
+  int num = 0;
+  while (!filestream.eof()) {
+    std::string buffer;
+    filestream >> buffer;
+
+    RECORD* record = alloc_record(num);
+    std::istringstream streambuffer(buffer);
+    std::string token;
+    while (std::getline(streambuffer, token, DEFAULT_DELIMITER)) {
+      record->attr.push_back(atoi(token.c_str()));
+    }
+    if (record->attr.size() > 0) {
+      t->push_back(record);
+      num++;
+    }
+  }
+  return true;
+}
+
 void print_database(int n) {
   for (int i = 0; i < n; i++) {
     for (long unsigned int j = 0; j < tables[i].size(); j++) {
-      printf("[Table#: %d, Row#: %ld] %d %d\n",
-        i, j, tables[i][j]->attr[0], tables[i][j]->attr[1]);
+      printf("[Table#: %d, Row#: %ld] ", i, j);
+      for (long unsigned int k = 0; k < tables[i][j]->attr.size(); k++)
+        printf("%d ", tables[i][j]->attr[k]);
+      printf("\n");
     }
   }
 }
@@ -70,59 +94,49 @@ Op* create_op_tree(Op *left, Op *right) {
 }
 
 int main(int argc, char *argv[]) {
-  tableSize = DEFAULT_TABLE_SIZE;
-  numSpace = DEFAULT_NUM_SPACE;
   struct timeval begin, end;
 
-  // if (argc >= 2) tableSize = atoi(argv[1]);
-  // if (argc == 3) numSpace = atoi(argv[2]);
-
-  unsigned int n;
-  std::cout << "Number of tables: ";
-  std::cin >> n;
-
-  std::cout << "Number of tuples in each table: ";
-  std::cin >> tableSize;
-
-  std::cout << "Key range (0 - ?): ";
-  std::cin >> numSpace;
-
-  if (n > MAX_TABLE_NUM || n < 2) {
+  unsigned int n = argc - 1;
+  if (n < 2 || n > MAX_TABLE_NUM) {
     printf("Invalid number of tables: %d\n", n);
-  } else {
-    init_database(n);
-    //print_database(n);
-
-    // Create tree of operators
-    std::vector<ScanOp*> scan(n);
-    for (unsigned int i=0; i < n; i++) {
-       scan[i] = new ScanOp(tables[i]);
-    }
-    Op *tree = create_op_tree((Op*)scan[0], (Op*)scan[1]);
-    for (unsigned int i=2; i < n; i++) {
-      tree = create_op_tree(tree, (Op*)scan[i]);
-    }
-
-    // Execute join
-    begin = cur_time();
-    tree->open();
-    int count = 0;
-    while (1) {
-      RECORD *rec = tree->next();
-      if (rec) {
-        count++;
-        // for (long unsigned int i = 0; i < rec->attr.size(); i++)
-        //   printf("%d ", rec->attr[i]);
-        // printf("\n");
-      } else {
-        break;
-      }
-    }
-    tree->close();
-    end = cur_time();
-    // printf("Number of matched rows: %d\n", count);
-    print_performance(begin, end);
+    exit(1);
   }
+
+  for (unsigned int i=0; i < n; i++) {
+    load_table(&tables[i], argv[i+1]);
+  }
+  // init_database(n);
+  // print_database(n);
+
+  // Create tree of operators
+  std::vector<ScanOp*> scan(n);
+  for (unsigned int i=0; i < n; i++) {
+     scan[i] = new ScanOp(tables[i]);
+  }
+  Op *tree = create_op_tree((Op*)scan[0], (Op*)scan[1]);
+  for (unsigned int i=2; i < n; i++) {
+    tree = create_op_tree(tree, (Op*)scan[i]);
+  }
+
+  // Execute join
+  begin = cur_time();
+  tree->open();
+  int count = 0;
+  while (1) {
+    RECORD *rec = tree->next();
+    if (rec) {
+      count++;
+      // for (long unsigned int i = 0; i < rec->attr.size(); i++)
+      //   printf("%d ", rec->attr[i]);
+      // printf("\n");
+    } else {
+      break;
+    }
+  }
+  tree->close();
+  end = cur_time();
+  // printf("Number of matched rows: %d\n", count);
+  print_performance(begin, end);
 
   return 0;
 }
