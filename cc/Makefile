@@ -1,5 +1,7 @@
 T0 = cc-test
-OBJ_T0 = main.o transaction_ss2pl.o operation.o util.o
+OBJ_T0 = main.o operation.o util.o \
+         transaction_base.o \
+				 transaction_ss2pl.o
 
 # For Mac OS
 CC = clang++

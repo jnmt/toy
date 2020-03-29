@@ -6,21 +6,38 @@
 #include <boost/thread.hpp>
 
 #include "common.hpp"
+#include "transaction.hpp"
 
-Transaction::Transaction() {}
+Ss2plTransaction::Ss2plTransaction() {}
 
-Transaction::~Transaction() {
+Ss2plTransaction::~Ss2plTransaction() {
   for (auto& op : operations) delete op;
   boost::lock_guard<boost::mutex> lock(stdout_mutex);
 }
 
-void Transaction::begin(boost::thread::id tid) {
+void Ss2plTransaction::execute(boost::thread::id tid) {
   threadId = tid;
+  retry:
+  begin();
+  for (auto& operation : getOperations()) {
+    if (operation->isRead())
+      read(operation);
+    else
+      write(operation);
+    if (status == TX_ABORT) {
+      usleep(3000); // to avoid resource contention
+      goto retry;
+    }
+  }
+  commit();
+}
+
+void Ss2plTransaction::begin() {
   status = TX_INPROGRESS;
   debug(boost::format("BEGIN"));
 }
 
-void Transaction::read(Operation *op) {
+void Ss2plTransaction::read(Operation *op) {
   int key = op->key;
   Record* record = getRecord(key);
 
@@ -40,7 +57,7 @@ out:
   return;
 }
 
-void Transaction::write(Operation *op) {
+void Ss2plTransaction::write(Operation *op) {
   int key = op->key;
   Record* record = getRecord(key);
   Operation* rop;
@@ -88,7 +105,7 @@ out:
   return;
 }
 
-void Transaction::commit() {
+void Ss2plTransaction::commit() {
   debug(boost::format("COMMIT"));
   for (auto itr = writeSet.begin(); itr != writeSet.end(); ++itr) {
     table[(*itr)->key]->attr = (*itr)->value;
@@ -97,7 +114,7 @@ void Transaction::commit() {
   status = TX_COMMIT;
 }
 
-void Transaction::abort() {
+void Ss2plTransaction::abort() {
   debug(boost::format("ABORT"));
   readSet.clear();
   writeSet.clear();
@@ -105,45 +122,7 @@ void Transaction::abort() {
   status = TX_ABORT;
 }
 
-Operation* Transaction::searchReadSet(int key) {
-  for (auto itr = readSet.begin(); itr != readSet.end(); ++itr) {
-    if ((*itr)->key == key)
-      return (*itr);
-  }
-  return NULL;
-}
-
-Operation* Transaction::searchWriteSet(int key) {
-  for (auto itr = writeSet.begin(); itr != writeSet.end(); ++itr) {
-    if ((*itr)->key == key)
-      return (*itr);
-  }
-  return NULL;
-}
-
-void Transaction::eraseFromReadSet(Operation* op) {
-  for (auto itr = readSet.begin(); itr != readSet.end();) {
-    if ((*itr) == op) {
-      readSet.erase(itr);
-      return;
-    }
-    else
-      ++itr;
-  }
-}
-
-void Transaction::eraseFromWriteSet(Operation* op) {
-  for (auto itr = writeSet.begin(); itr != writeSet.end();) {
-    if ((*itr) == op) {
-      writeSet.erase(itr);
-      return;
-    }
-    else
-      ++itr;
-  }
-}
-
-void Transaction::eraseFromReadLocks(boost::shared_mutex* m) {
+void Ss2plTransaction::eraseFromReadLocks(boost::shared_mutex* m) {
   for (auto itr = readLocks.begin(); itr != readLocks.end();) {
     if ((*itr) == m) {
       readLocks.erase(itr);
@@ -154,7 +133,7 @@ void Transaction::eraseFromReadLocks(boost::shared_mutex* m) {
   }
 }
 
-void Transaction::releaseLock() {
+void Ss2plTransaction::releaseLock() {
   for (auto itr = readLocks.begin(); itr != readLocks.end(); ++itr)
     (*itr)->unlock_shared();
   for (auto itr = writeLocks.begin(); itr != writeLocks.end(); ++itr)
@@ -162,43 +141,3 @@ void Transaction::releaseLock() {
   readLocks.clear();
   writeLocks.clear();
 }
-
-void Transaction::generateOperations(int numOperations, int readRatio) {
-  Operation* op;
-  int type, key, value;
-  auto seed = std::chrono::duration_cast<std::chrono::microseconds>(
-    std::chrono::high_resolution_clock::now().time_since_epoch()
-  ).count();
-  srand(seed);
-  for (int i = 0; i < numOperations; i++) {
-    type = rand() % 100 < readRatio ? OP_READ : OP_WRITE;
-    key = rand() % table.size();
-    if (type == OP_READ) {
-      op = new Operation(key);
-    } else {
-      value = rand();
-      op = new Operation(key, value);
-    }
-    operations.push_back(op);
-  }
-}
-
-std::vector<Operation*> Transaction::getOperations() {
-  return operations;
-}
-
-Record* Transaction::getRecord(int key) {
-  return table[key];
-}
-
-#ifdef _DEBUG
-void Transaction::debug(boost::format fmt) {
-  boost::lock_guard<boost::mutex> lock(stdout_mutex);
-  auto now = std::chrono::duration_cast<std::chrono::microseconds>(
-    std::chrono::high_resolution_clock::now().time_since_epoch()
-  ).count();
-  std::cout << now << " [" << threadId << "] " << fmt << std::endl;
-}
-#else
-void Transaction::debug(boost::format fmt) {}
-#endif

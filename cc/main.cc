@@ -6,6 +6,7 @@
 #include <boost/thread.hpp>
 
 #include "common.hpp"
+#include "transaction.hpp"
 
 std::vector<Record*> table;
 std::vector<std::vector<Transaction*>> tasks;
@@ -14,22 +15,8 @@ std::vector<Transaction*> txtask(1000);
 boost::mutex stdout_mutex;
 
 void worker(std::vector<Transaction*> task) {
-  for (auto& transaction : task) {
-    retry:
-    transaction->begin(boost::this_thread::get_id());
-    for (auto& operation : transaction->getOperations()) {
-      if (operation->isRead())
-        transaction->read(operation);
-      else
-        transaction->write(operation);
-      if (transaction->status == TX_ABORT) {
-        usleep(3000); // to avoid resource contention
-        goto retry;
-      }
-    }
-    transaction->commit();
-    delete transaction;
-  }
+  for (auto& transaction : task)
+    transaction->execute(boost::this_thread::get_id());
 }
 
 Record* alloc_record() {
@@ -44,13 +31,20 @@ void init_database(int n) {
   }
 }
 
-Transaction* generate_transaction(int numOps, int readRatio) {
-  Transaction* tx = new Transaction();
+Transaction* generate_transaction(int mode, int numOps, int readRatio) {
+  Transaction* tx;
+  switch (mode) {
+    case MODE_S2PL:
+      tx = (Transaction*)new Ss2plTransaction();
+      break;
+    default:
+      tx = (Transaction*)new BaseTransaction();
+  }
   tx->generateOperations(numOps, readRatio);
-  return tx;
+  return (Transaction*)tx;
 }
 
-void init_tasks(int numThreads, int numTransactions,
+void init_tasks(int mode, int numThreads, int numTransactions,
                 int numOps, int readRatio) {
   for (int i = 0; i < numThreads; i++) {
     std::vector<Transaction*> task;
@@ -58,7 +52,7 @@ void init_tasks(int numThreads, int numTransactions,
   }
   for (int i = 0; i < numTransactions; i++) {
     tasks[i%numThreads].push_back(
-      generate_transaction(numOps, readRatio));
+      generate_transaction(mode, numOps, readRatio));
   }
 }
 
@@ -117,7 +111,7 @@ int main(int argc, char *argv[]) {
             << "  Read: " << readRatio << "%" << std::endl;
 
   init_database(tableSize);
-  init_tasks(numThreads, numTxns, numOps, readRatio);
+  init_tasks(MODE_S2PL, numThreads, numTxns, numOps, readRatio);
 
   begin = cur_time();
   for (int i = 0; i < numThreads; i++) {
