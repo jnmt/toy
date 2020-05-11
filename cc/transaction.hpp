@@ -27,18 +27,18 @@ protected:
   int status;
   boost::thread::id threadId;
   std::vector<Operation*> operations;
-  std::vector<Operation*> readSet;
-  std::vector<Operation*> writeSet;
+  std::map<int,Record*> readSet;
+  std::map<int,Record*> writeSet;
   void begin();
   void commit();
   void abort();
   void read(Operation *op);
   void write(Operation *op);
   std::vector<Operation*> getOperations();
-  Operation* searchReadSet(int key);
-  Operation* searchWriteSet(int key);
-  void eraseFromReadSet(Operation *op);
-  void eraseFromWriteSet(Operation *op);
+  Record* searchReadSet(int key);
+  Record* searchWriteSet(int key);
+  void eraseFromReadSet(int key);
+  void eraseFromWriteSet(int key);
   Record* getRecord(int key);
   void debug(boost::format fmt);
 public:
@@ -63,5 +63,21 @@ public:
   int status;
   Ss2plTransaction();
   ~Ss2plTransaction();
+  void execute(const boost::thread::id tid);
+};
+
+class OccTransaction : BaseTransaction {
+private:
+  int startTxId;
+  void begin();
+  void commit();
+  void abort();
+  void read(Operation *op);
+  void write(Operation *op);
+  bool validate();
+public:
+  int status;
+  OccTransaction();
+  ~OccTransaction();
   void execute(const boost::thread::id tid);
 };

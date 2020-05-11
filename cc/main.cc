@@ -19,23 +19,36 @@ void worker(std::vector<Transaction*> task) {
     transaction->execute(boost::this_thread::get_id());
 }
 
-Record* alloc_record() {
-  Record *record = new Record();
+Record* alloc_record(int mode) {
+  Record *record;
+  switch (mode) {
+    case MODE_SS2PL:
+      record = (Record*)new Ss2plRecord();
+      break;
+    case MODE_OCC:
+      record = (Record*)new OccRecord();
+      break;
+    default:
+      record = (Record*)new Record();
+  }
   record->attr = 0;
   return record;
 }
 
-void init_database(int n) {
+void init_database(int mode, int n) {
   for (int i = 0; i < n; i++) {
-    table.push_back(alloc_record());
+    table.push_back(alloc_record(mode));
   }
 }
 
 Transaction* generate_transaction(int mode, int numOps, int readRatio) {
   Transaction* tx;
   switch (mode) {
-    case MODE_S2PL:
+    case MODE_SS2PL:
       tx = (Transaction*)new Ss2plTransaction();
+      break;
+    case MODE_OCC:
+      tx = (Transaction*)new OccTransaction();
       break;
     default:
       tx = (Transaction*)new BaseTransaction();
@@ -95,7 +108,17 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  std::string mode = argmap["mode"].as<std::string>();
+  int mode;
+  std::string mode_str = argmap["mode"].as<std::string>();
+  if (mode_str == MODE_STR_SS2PL)
+    mode = MODE_SS2PL;
+  else if (mode_str == MODE_STR_OCC)
+    mode = MODE_OCC;
+  else {
+    std::cout << desc << std::endl;
+    return 1;
+  }
+
   int tableSize = argmap["table-size"].as<int>();
   int numThreads = argmap["num-threads"].as<int>();
   int numTxns = argmap["num-transactions"].as<int>();
@@ -103,22 +126,20 @@ int main(int argc, char *argv[]) {
   int readRatio = argmap["read-ratio"].as<int>();
 
   std::cout << "Starting with following parameters" << std::endl
-            << "  Mode: " << mode << std::endl
+            << "  Mode: " << mode_str << std::endl
             << "  Threads: " << numThreads << std::endl
             << "  Records in table: " << tableSize << std::endl
             << "  Number of transactions to run: " << numTxns << std::endl
             << "  Number of operation in transaction: " << numOps << std::endl
             << "  Read: " << readRatio << "%" << std::endl;
 
-  init_database(tableSize);
-  init_tasks(MODE_S2PL, numThreads, numTxns, numOps, readRatio);
+  init_database(mode, tableSize);
+  init_tasks(mode, numThreads, numTxns, numOps, readRatio);
 
   begin = cur_time();
   for (int i = 0; i < numThreads; i++) {
-    // TODO: Learn difference between push_back+move and emplace_back
     boost::thread t(worker, tasks[i]);
     threads.push_back(std::move(t));
-    //threads.emplace_back(worker, tasks[i]);
   }
   for (auto& thread : threads) thread.join();
 

@@ -36,42 +36,20 @@ void BaseTransaction::abort() { status = TX_ABORT; }
 void BaseTransaction::read(Operation *op) {}
 void BaseTransaction::write(Operation *op) {}
 
-Operation* BaseTransaction::searchReadSet(int key) {
-  for (auto itr = readSet.begin(); itr != readSet.end(); ++itr) {
-    if ((*itr)->key == key)
-      return (*itr);
+Record* BaseTransaction::searchReadSet(int k) {
+  for (const auto& [key, record] : readSet) {
+    if (key == k)
+      return record;
   }
   return NULL;
 }
 
-Operation* BaseTransaction::searchWriteSet(int key) {
-  for (auto itr = writeSet.begin(); itr != writeSet.end(); ++itr) {
-    if ((*itr)->key == key)
-      return (*itr);
+Record* BaseTransaction::searchWriteSet(int k) {
+  for (const auto& [key, record] : writeSet) {
+    if (key == k)
+      return record;
   }
   return NULL;
-}
-
-void BaseTransaction::eraseFromReadSet(Operation* op) {
-  for (auto itr = readSet.begin(); itr != readSet.end();) {
-    if ((*itr) == op) {
-      readSet.erase(itr);
-      return;
-    }
-    else
-      ++itr;
-  }
-}
-
-void BaseTransaction::eraseFromWriteSet(Operation* op) {
-  for (auto itr = writeSet.begin(); itr != writeSet.end();) {
-    if ((*itr) == op) {
-      writeSet.erase(itr);
-      return;
-    }
-    else
-      ++itr;
-  }
 }
 
 void BaseTransaction::generateOperations(int numOperations, int readRatio) {

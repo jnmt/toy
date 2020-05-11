@@ -8,7 +8,11 @@
 #define DEFAULT_NUM_OPERATIONS 10
 #define DEFAULT_TABLE_SIZE 10000
 
-#define MODE_S2PL 0
+#define MODE_SS2PL 0
+#define MODE_OCC 1
+
+#define MODE_STR_SS2PL "ss2pl"
+#define MODE_STR_OCC "occ"
 
 #define OP_READ  0
 #define OP_WRITE 1
@@ -23,9 +27,17 @@
 
 class Record {
 public:
-  boost::upgrade_mutex m; // For SS2PL
   int attr;
 };
+
+class Ss2plRecord : public Record {
+public:
+  boost::upgrade_mutex m;
+};
+
+class OccRecord : public Record {
+};
+
 extern std::vector<Record*> table;
 
 class Operation {

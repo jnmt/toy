@@ -12,7 +12,6 @@ Ss2plTransaction::Ss2plTransaction() {}
 
 Ss2plTransaction::~Ss2plTransaction() {
   for (auto& op : operations) delete op;
-  boost::lock_guard<boost::mutex> lock(stdout_mutex);
 }
 
 void Ss2plTransaction::execute(boost::thread::id tid) {
@@ -39,14 +38,14 @@ void Ss2plTransaction::begin() {
 
 void Ss2plTransaction::read(Operation *op) {
   int key = op->key;
-  Record* record = getRecord(key);
+  Ss2plRecord* record = (Ss2plRecord*)getRecord(key);
 
   if (searchReadSet(key) || searchWriteSet(key))
     goto out;
 
   if (record->m.try_lock_shared()) {
     debug(boost::format("READ %1% locked") % key);
-    readSet.push_back(op);
+    readSet.emplace(key, record);
     readLocks.push_back(&(record->m));
   } else {
     debug(boost::format("READ %1% lock failed") % key);
@@ -59,20 +58,19 @@ out:
 
 void Ss2plTransaction::write(Operation *op) {
   int key = op->key;
-  Record* record = getRecord(key);
-  Operation* rop;
-  Operation* wop;
+  Ss2plRecord* record = (Ss2plRecord*)getRecord(key);
+  Ss2plRecord *newRecord = new Ss2plRecord();
+  newRecord->attr = op->value;
 
-  rop = searchReadSet(key);
-  if (rop) {
+  if (searchReadSet(key)) {
     if (record->m.try_lock_upgrade()) {
       record->m.unlock_shared();
-      eraseFromReadSet(rop);
+      readSet.erase(key);
       eraseFromReadLocks(&(record->m));
       // This may fail if other threads has lock_shared
       if (record->m.try_unlock_upgrade_and_lock()) {
         debug(boost::format("WRITE %1% lock upgraded") % key);
-        writeSet.push_back(op);
+        writeSet.emplace(key, newRecord);
         writeLocks.push_back(&(record->m));
         goto out;
       } else
@@ -81,16 +79,15 @@ void Ss2plTransaction::write(Operation *op) {
       goto abort;
   }
 
-  wop = searchWriteSet(key);
-  if (wop) {
-    eraseFromWriteSet(wop);
-    writeSet.push_back(op);
+  if (searchWriteSet(key)) {
+    writeSet.erase(key);
+    writeSet.emplace(key, newRecord);
     goto out;
   }
 
   if (record->m.try_lock()) {
     debug(boost::format("WRITE %1% locked") % key);
-    writeSet.push_back(op);
+    writeSet.emplace(key, newRecord);
     writeLocks.push_back(&(record->m));
     goto out;
   } else {
@@ -107,8 +104,9 @@ out:
 
 void Ss2plTransaction::commit() {
   debug(boost::format("COMMIT"));
-  for (auto itr = writeSet.begin(); itr != writeSet.end(); ++itr) {
-    table[(*itr)->key]->attr = (*itr)->value;
+  for (const auto& [key, record] : writeSet) {
+    // TODO: Delete old record alter releaseLock() to prevent memory leak
+    table[key] = record;
   }
   releaseLock();
   status = TX_COMMIT;
