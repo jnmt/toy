@@ -12,6 +12,11 @@ std::atomic<int> txId(0);
 boost::mutex valwrite_mutex;
 std::vector<OccTransaction*> txns;
 
+/* GC */
+#define OCC_GC_THRESHOLD 10000
+std::atomic<int> deletedTxId(-1);
+std::map<boost::thread::id,int> progress;
+
 OccTransaction::OccTransaction() {}
 
 OccTransaction::~OccTransaction() {
@@ -33,6 +38,7 @@ void OccTransaction::execute(boost::thread::id tid) {
     boost::mutex::scoped_lock scoped_lock(valwrite_mutex);
     if (validate()) {
       commit();
+      gc();
     } else {
       abort();
       goto retry;
@@ -93,9 +99,10 @@ out:
 }
 
 bool OccTransaction::validate() {
-  int finishTxId = txId.load();
-  for (int i = startTxId; i < finishTxId; i++) {
-    debug(boost::format("Validating tx #%1%") % i);
+  int begin = startTxId - (deletedTxId.load() + 1);
+  int end = txId.load() - (deletedTxId.load() + 1);
+  for (int i = begin; i < end; i++) {
+    debug(boost::format("Validating tx #%1%") % (i + deletedTxId.load() - 1));
     for (const auto& [key, record] : readSet) {
       if (txns[i]->searchWriteSet(key)) {
         debug(boost::format("Conflict with %1%, %2%") % key % record);
@@ -107,12 +114,13 @@ bool OccTransaction::validate() {
 }
 
 void OccTransaction::commit() {
-  debug(boost::format("COMMIT"));
+  debug(boost::format("COMMIT tx #%1%") % txId.load());
   for (const auto& [key, record] : writeSet) {
     table[key]->attr = record->attr;
   }
   status = TX_COMMIT;
   txns.push_back(this);
+  progress[threadId] = txId.load();
   txId++;
 }
 
@@ -121,4 +129,20 @@ void OccTransaction::abort() {
   readSet.clear();
   writeSet.clear();
   status = TX_ABORT;
+}
+
+void OccTransaction::gc() {
+  if (txns.size() > OCC_GC_THRESHOLD) {
+    auto slowest = std::min_element(progress.begin(), progress.end(),
+      [](const std::pair<boost::thread::id,int>& p1,
+         const std::pair<boost::thread::id,int>& p2) {
+        return p1.second < p2.second;
+      });
+    int numTxnsDeleted = slowest->second - deletedTxId.load();
+    if (numTxnsDeleted > 0) {
+      debug(boost::format("GC transactions <= #%1%") % slowest->second);
+      txns.erase(txns.begin(), txns.begin() + numTxnsDeleted);
+      deletedTxId = slowest->second;
+    }
+  }
 }

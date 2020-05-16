@@ -75,6 +75,7 @@ private:
   void read(Operation *op);
   void write(Operation *op);
   bool validate();
+  void gc();
 public:
   int status;
   OccTransaction();
